@@ -149,4 +149,14 @@ public class Device extends GroupedModel {
         this.disabled = disabled;
     }
 
+    private boolean forward;
+
+    public boolean getForward() {
+        return forward;
+    }
+
+    public void setForward(boolean forward) {
+        this.forward = forward;
+    }
+
 }

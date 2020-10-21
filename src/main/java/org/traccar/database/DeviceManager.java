@@ -284,6 +284,7 @@ public class DeviceManager extends BaseObjectManager<Device> implements Identity
         cachedDevice.setContact(device.getContact());
         cachedDevice.setModel(device.getModel());
         cachedDevice.setDisabled(device.getDisabled());
+        cachedDevice.setForward(device.getForward());
         cachedDevice.setAttributes(device.getAttributes());
         if (!device.getUniqueId().equals(cachedDevice.getUniqueId())) {
             removeByUniqueId(cachedDevice.getUniqueId());

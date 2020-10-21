@@ -31,6 +31,7 @@ import org.traccar.helper.Checksum;
 import org.traccar.model.Device;
 import org.traccar.model.Position;
 import org.traccar.model.Group;
+import org.traccar.database.DeviceManager;
 
 import javax.inject.Inject;
 import javax.ws.rs.core.HttpHeaders;
@@ -284,6 +285,11 @@ public class WebDataHandler extends BaseDataHandler {
 
     @Override
     protected Position handlePosition(Position position) {
+
+        Device device = identityManager.getById(position.getDeviceId());
+        if (!device.getForward()) {
+            return position;
+        }
 
         AsyncRequestAndCallback request = new AsyncRequestAndCallback(position);
         request.send();
