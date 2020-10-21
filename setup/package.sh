@@ -54,7 +54,7 @@ check_requirement () {
 
 info "Checking build requirements for platform: "$PLATFORM
 check_requirement "Traccar server archive" "ls ../target/tracker-server.jar" "Missing traccar archive"
-check_requirement "Traccar web interface" "ls ../traccar-web/tools/minify.sh" "Missing traccar-web sources"
+check_requirement "Traccar web interface" "ls ../../traccar-web/tools/minify.sh" "Missing traccar-web sources"
 check_requirement "Zip" "which zip" "Missing zip binary"
 check_requirement "Unzip" "which unzip" "Missing unzip binary"
 check_requirement "Ext JS" "ls $EXTJS_PATH" "ExtJS not found in $EXTJS_PATH (https://www.sencha.com/legal/GPL/)"
@@ -86,7 +86,7 @@ fi
 
 prepare () {
   info "Generating app.min.js"
-  ../traccar-web/tools/minify.sh >/dev/null
+  ../../traccar-web/tools/minify.sh >/dev/null
   ok "Created app.min.js"
 
   mkdir -p out/{conf,data,lib,logs,web,schema,templates}
@@ -95,7 +95,7 @@ prepare () {
   cp ../target/lib/* out/lib
   cp ../schema/* out/schema
   cp -r ../templates/* out/templates
-  cp -r ../traccar-web/web/* out/web
+  cp -r ../../traccar-web/web/* out/web
   cp default.xml out/conf
   cp traccar.xml out/conf
 
@@ -107,7 +107,7 @@ prepare () {
 
 cleanup () {
   info "Cleanup"
-  rm ../traccar-web/web/app.min.js
+  rm ../../traccar-web/web/app.min.js
 
   rm -r out
   if [ $PLATFORM = "all" -o $PLATFORM = "windows-64" ]; then
