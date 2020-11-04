@@ -30,19 +30,26 @@ import java.net.InetSocketAddress;
 public abstract class TrackerServer {
 
     private final boolean datagram;
+    private final boolean useSSL;
     private final AbstractBootstrap bootstrap;
 
     public boolean isDatagram() {
         return datagram;
     }
 
-    public TrackerServer(boolean datagram, String protocol) {
+    public TrackerServer(boolean datagram, String protocol, boolean useSSL) {
         this.datagram = datagram;
+        this.useSSL = useSSL;
 
         address = Context.getConfig().getString(protocol + ".address");
-        port = Context.getConfig().getInteger(protocol + ".port");
+        if (useSSL == false) {
+            port = Context.getConfig().getInteger(protocol + ".port");
+        }
+        else {
+            port = Context.getConfig().getInteger(protocol + ".ssl.port");
+        }
 
-        BasePipelineFactory pipelineFactory = new BasePipelineFactory(this, protocol) {
+        BasePipelineFactory pipelineFactory = new BasePipelineFactory(this, protocol, useSSL) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline) {
                 TrackerServer.this.addProtocolHandlers(pipeline);
@@ -64,6 +71,10 @@ public abstract class TrackerServer {
                     .childHandler(pipelineFactory);
 
         }
+    }
+
+    public TrackerServer(boolean datagram, String protocol) {
+        this(datagram, protocol, false);
     }
 
     protected abstract void addProtocolHandlers(PipelineBuilder pipeline);

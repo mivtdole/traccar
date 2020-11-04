@@ -19,6 +19,7 @@ import org.traccar.BaseProtocol;
 import org.traccar.PipelineBuilder;
 import org.traccar.TrackerServer;
 import org.traccar.model.Command;
+import org.traccar.Context;
 
 public class TeltonikaProtocol extends BaseProtocol {
 
@@ -33,6 +34,16 @@ public class TeltonikaProtocol extends BaseProtocol {
                 pipeline.addLast(new TeltonikaProtocolDecoder(TeltonikaProtocol.this, false));
             }
         });
+        if (Context.getConfig().getInteger(getName() + ".ssl.port") != 0) {
+            addServer(new TrackerServer(false, getName(), true) {
+                @Override
+                protected void addProtocolHandlers(PipelineBuilder pipeline) {
+                    pipeline.addLast(new TeltonikaFrameDecoder());
+                    pipeline.addLast(new TeltonikaProtocolEncoder(TeltonikaProtocol.this));
+                    pipeline.addLast(new TeltonikaProtocolDecoder(TeltonikaProtocol.this, false));
+                }
+            });
+        }
         addServer(new TrackerServer(true, getName()) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline) {

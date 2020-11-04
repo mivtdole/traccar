@@ -21,6 +21,10 @@ import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOutboundHandler;
 import io.netty.channel.ChannelPipeline;
+import io.netty.handler.ssl.ClientAuth;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +55,7 @@ import org.traccar.handler.OpenChannelHandler;
 import org.traccar.handler.RemoteAddressHandler;
 import org.traccar.handler.StandardLoggingHandler;
 
+import java.io.File;
 import java.util.Map;
 
 public abstract class BasePipelineFactory extends ChannelInitializer<Channel> {
@@ -59,17 +64,56 @@ public abstract class BasePipelineFactory extends ChannelInitializer<Channel> {
 
     private final TrackerServer server;
     private final String protocol;
+    private boolean useSSL;
     private final boolean eventsEnabled;
     private int timeout;
+    private SslContext sslContext;
 
-    public BasePipelineFactory(TrackerServer server, String protocol) {
+    public BasePipelineFactory(TrackerServer server, String protocol, boolean useSSL) {
         this.server = server;
         this.protocol = protocol;
+        this.useSSL = useSSL;
+
+        this.sslContext = null;
+
+        if (useSSL) {
+            try {
+                if (Context.getConfig().hasKey(protocol + ".ssl.ca")) {
+                    File caCert = new File(Context.getConfig().getString(protocol + ".ssl.ca"));
+                    if (Context.getConfig().hasKey(protocol + ".ssl.cert")) {
+                        File serverCert = new File(Context.getConfig().getString(protocol + ".ssl.cert"));
+                        if (Context.getConfig().hasKey(protocol + ".ssl.key")) {
+                            File serverKey = new File(Context.getConfig().getString(protocol + ".ssl.key"));
+                            this.sslContext = SslContextBuilder.forServer(serverCert, serverKey)
+                                    .trustManager(caCert)
+                                    .clientAuth(ClientAuth.REQUIRE).build();
+                        } else {
+                            this.useSSL = false;
+                        }
+                    }
+                    else {
+                        this.useSSL = false;
+                    }
+                }
+                else {
+                    this.useSSL = false;
+                }
+            }
+            catch (Exception e) {
+                this.useSSL = false;
+                this.sslContext = null;
+            }
+        }
+
         eventsEnabled = Context.getConfig().getBoolean(Keys.EVENT_ENABLE);
         timeout = Context.getConfig().getInteger(Keys.PROTOCOL_TIMEOUT.withPrefix(protocol));
         if (timeout == 0) {
             timeout = Context.getConfig().getInteger(Keys.SERVER_TIMEOUT);
         }
+    }
+
+    public BasePipelineFactory(TrackerServer server, String protocol) {
+        this(server, protocol, false);
     }
 
     protected abstract void addProtocolHandlers(PipelineBuilder pipeline);
@@ -101,6 +145,10 @@ public abstract class BasePipelineFactory extends ChannelInitializer<Channel> {
     @Override
     protected void initChannel(Channel channel) {
         final ChannelPipeline pipeline = channel.pipeline();
+
+        if (useSSL) {
+            pipeline.addFirst(sslContext.newHandler(channel.alloc()));
+        }
 
         if (timeout > 0 && !server.isDatagram()) {
             pipeline.addLast(new IdleStateHandler(timeout, 0, 0));
