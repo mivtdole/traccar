@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 - 2019 Anton Tananaev (anton@traccar.org)
+ * Copyright 2018 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import org.traccar.config.Config;
 import org.traccar.config.Keys;
 import org.traccar.database.AttributesManager;
 import org.traccar.database.CalendarManager;
+import org.traccar.database.ConnectionManager;
 import org.traccar.database.DataManager;
 import org.traccar.database.DeviceManager;
 import org.traccar.database.GeofenceManager;
@@ -40,11 +41,13 @@ import org.traccar.geocoder.GisgraphyGeocoder;
 import org.traccar.geocoder.GoogleGeocoder;
 import org.traccar.geocoder.HereGeocoder;
 import org.traccar.geocoder.MapQuestGeocoder;
+import org.traccar.geocoder.MapTilerGeocoder;
 import org.traccar.geocoder.MapmyIndiaGeocoder;
 import org.traccar.geocoder.NominatimGeocoder;
 import org.traccar.geocoder.OpenCageGeocoder;
 import org.traccar.geocoder.PositionStackGeocoder;
 import org.traccar.geocoder.TomTomGeocoder;
+import org.traccar.geocoder.MapboxGeocoder;
 import org.traccar.geolocation.GeolocationProvider;
 import org.traccar.geolocation.GoogleGeolocationProvider;
 import org.traccar.geolocation.MozillaGeolocationProvider;
@@ -64,6 +67,7 @@ import org.traccar.handler.RemoteAddressHandler;
 import org.traccar.handler.SpeedLimitHandler;
 import org.traccar.handler.TimeHandler;
 import org.traccar.handler.events.AlertEventHandler;
+import org.traccar.handler.events.BehaviorEventHandler;
 import org.traccar.handler.events.CommandResultEventHandler;
 import org.traccar.handler.events.DriverEventHandler;
 import org.traccar.handler.events.FuelDropEventHandler;
@@ -100,6 +104,11 @@ public class MainModule extends AbstractModule {
     @Provides
     public static IdentityManager provideIdentityManager() {
         return Context.getIdentityManager();
+    }
+
+    @Provides
+    public static ConnectionManager provideConnectionManager() {
+        return Context.getConnectionManager();
     }
 
     @Provides
@@ -184,6 +193,10 @@ public class MainModule extends AbstractModule {
                     return new TomTomGeocoder(url, key, cacheSize, addressFormat);
                 case "positionstack":
                     return new PositionStackGeocoder(key, cacheSize, addressFormat);
+                case "mapbox":
+                    return new MapboxGeocoder(key, cacheSize, addressFormat);
+                case "maptiler":
+                    return new MapTilerGeocoder(key, cacheSize, addressFormat);
                 default:
                     return new GoogleGeocoder(key, language, cacheSize, addressFormat);
             }
@@ -264,7 +277,7 @@ public class MainModule extends AbstractModule {
     @Provides
     public static WebDataHandler provideWebDataHandler(
             Config config, IdentityManager identityManager, ObjectMapper objectMapper, Client client) {
-        if (config.getBoolean(Keys.FORWARD_ENABLE)) {
+        if (config.hasKey(Keys.FORWARD_URL)) {
             return new WebDataHandler(config, identityManager, objectMapper, client);
         }
         return null;
@@ -283,10 +296,9 @@ public class MainModule extends AbstractModule {
     @Singleton
     @Provides
     public static GeocoderHandler provideGeocoderHandler(
-            Config config, @Nullable Geocoder geocoder, IdentityManager identityManager,
-            StatisticsManager statisticsManager) {
+            Config config, @Nullable Geocoder geocoder, IdentityManager identityManager) {
         if (geocoder != null) {
-            return new GeocoderHandler(config, geocoder, identityManager, statisticsManager);
+            return new GeocoderHandler(config, geocoder, identityManager);
         }
         return null;
     }
@@ -367,6 +379,12 @@ public class MainModule extends AbstractModule {
 
     @Singleton
     @Provides
+    public static BehaviorEventHandler provideBehaviorEventHandler(Config config, IdentityManager identityManager) {
+        return new BehaviorEventHandler(config, identityManager);
+    }
+
+    @Singleton
+    @Provides
     public static FuelDropEventHandler provideFuelDropEventHandler(IdentityManager identityManager) {
         return new FuelDropEventHandler(identityManager);
     }
@@ -381,8 +399,9 @@ public class MainModule extends AbstractModule {
     @Singleton
     @Provides
     public static GeofenceEventHandler provideGeofenceEventHandler(
-            IdentityManager identityManager, GeofenceManager geofenceManager, CalendarManager calendarManager) {
-        return new GeofenceEventHandler(identityManager, geofenceManager, calendarManager);
+            IdentityManager identityManager, GeofenceManager geofenceManager, CalendarManager calendarManager,
+            ConnectionManager connectionManager) {
+        return new GeofenceEventHandler(identityManager, geofenceManager, calendarManager, connectionManager);
     }
 
     @Singleton

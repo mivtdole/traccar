@@ -20,9 +20,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.traccar.Context;
+import org.traccar.config.Keys;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 import org.traccar.model.User;
+import org.traccar.notification.NotificationMessage;
 import org.traccar.notification.NotificationFormatter;
 
 import javax.ws.rs.client.Entity;
@@ -36,8 +38,12 @@ public class NotificatorFirebase extends Notificator {
     private final String key;
 
     public static class Notification {
+        @JsonProperty("title")
+        private String title;
         @JsonProperty("body")
         private String body;
+        @JsonProperty("sound")
+        private String sound;
     }
 
     public static class Message {
@@ -50,7 +56,7 @@ public class NotificatorFirebase extends Notificator {
     public NotificatorFirebase() {
         this(
                 "https://fcm.googleapis.com/fcm/send",
-                Context.getConfig().getString("notificator.firebase.key"));
+                Context.getConfig().getString(Keys.NOTIFICATOR_FIREBASE_KEY));
     }
 
     protected NotificatorFirebase(String url, String key) {
@@ -63,8 +69,12 @@ public class NotificatorFirebase extends Notificator {
         final User user = Context.getPermissionsManager().getUser(userId);
         if (user.getAttributes().containsKey("notificationTokens")) {
 
+            NotificationMessage shortMessage = NotificationFormatter.formatMessage(userId, event, position, "short");
+
             Notification notification = new Notification();
-            notification.body = NotificationFormatter.formatShortMessage(userId, event, position).trim();
+            notification.title = shortMessage.getSubject();
+            notification.body = shortMessage.getBody();
+            notification.sound = "default";
 
             Message message = new Message();
             message.tokens = user.getString("notificationTokens").split("[, ]");

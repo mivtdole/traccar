@@ -9,7 +9,14 @@ public class H02ProtocolDecoderTest extends ProtocolTest {
     @Test
     public void testDecode() throws Exception {
 
-        H02ProtocolDecoder decoder = new H02ProtocolDecoder(null);
+        var decoder = new H02ProtocolDecoder(null);
+
+        verifyPosition(decoder, buffer(
+                "*HQ,4970105243,V1,104000,A,2235.1777,N,11357.8913,E,000.27,235,130721,FFFFFBFF,460,11,d18e105,7752,6#"));
+
+        verifyAttribute(decoder, buffer(
+                "*HQ,135790246811220,HTBT,100#"),
+                Position.KEY_BATTERY_LEVEL, 100);
 
         verifyPosition(decoder, buffer(
                 "*HQ,9180271064,V5,091233,V,2348.8912,N,09021.3302,E,000.00,000,051219,FFFFBBFF,470,01,21019,2033,2921283#"));
@@ -260,7 +267,7 @@ public class H02ProtocolDecoderTest extends ProtocolTest {
     @Test
     public void testDecodeStatus() throws Exception {
 
-        H02ProtocolDecoder decoder = new H02ProtocolDecoder(null);
+        var decoder = new H02ProtocolDecoder(null);
 
         verifyAttribute(decoder, buffer(
                 "*HQ,2705171109,V1,213324,A,5002.5849,N,01433.7822,E,0.00,000,140613,FFFFFFFF#"),

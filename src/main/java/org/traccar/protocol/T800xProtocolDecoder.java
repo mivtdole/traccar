@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 - 2020 Anton Tananaev (anton@traccar.org)
+ * Copyright 2015 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,7 +54,12 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
     public static final int MSG_GPS = 0x02;
     public static final int MSG_HEARTBEAT = 0x03;
     public static final int MSG_ALARM = 0x04;
-    public static final int MSG_NETWORK = 0x05;
+    public static final int MSG_NETWORK = 0x05; // 0x2727
+    public static final int MSG_DRIVER_BEHAVIOR_1 = 0x05; // 0x2626
+    public static final int MSG_DRIVER_BEHAVIOR_2 = 0x06; // 0x2626
+    public static final int MSG_BLE = 0x10;
+    public static final int MSG_GPS_2 = 0x13;
+    public static final int MSG_ALARM_2 = 0x14;
     public static final int MSG_COMMAND = 0x81;
 
     private void sendResponse(Channel channel, short header, int type, int index, ByteBuf imei, int alarm) {
@@ -131,15 +136,16 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
             return null;
         }
 
-        if (type != MSG_GPS && type != MSG_ALARM) {
+        boolean positionType = type == MSG_GPS || type == MSG_GPS_2 || type == MSG_ALARM || type == MSG_ALARM_2;
+        if (!positionType) {
             sendResponse(channel, header, type, index, imei, 0);
         }
 
-        if (type == MSG_GPS || type == MSG_ALARM) {
+        if (positionType) {
 
             return decodePosition(channel, deviceSession, buf, type, index, imei);
 
-        } else if (type == MSG_NETWORK) {
+        } else if (type == MSG_NETWORK && header == 0x2727) {
 
             Position position = new Position(getProtocolName());
             position.setDeviceId(deviceSession.getDeviceId());
@@ -158,6 +164,56 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
 
             return position;
 
+        } else if ((type == MSG_DRIVER_BEHAVIOR_1 || type == MSG_DRIVER_BEHAVIOR_2) && header == 0x2626) {
+
+            Position position = new Position(getProtocolName());
+            position.setDeviceId(deviceSession.getDeviceId());
+
+            switch (buf.readUnsignedByte()) {
+                case 0:
+                case 4:
+                    position.set(Position.KEY_ALARM, Position.ALARM_BRAKING);
+                    break;
+                case 1:
+                case 3:
+                case 5:
+                    position.set(Position.KEY_ALARM, Position.ALARM_ACCELERATION);
+                    break;
+                case 2:
+                    if (type == MSG_DRIVER_BEHAVIOR_1) {
+                        position.set(Position.KEY_ALARM, Position.ALARM_BRAKING);
+                    } else {
+                        position.set(Position.KEY_ALARM, Position.ALARM_CORNERING);
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            position.setTime(readDate(buf));
+
+            if (type == MSG_DRIVER_BEHAVIOR_2) {
+                int status = buf.readUnsignedByte();
+                position.setValid(!BitUtil.check(status, 7));
+                buf.skipBytes(5); // acceleration
+            } else {
+                position.setValid(true);
+            }
+
+            position.setAltitude(buf.readFloatLE());
+            position.setLongitude(buf.readFloatLE());
+            position.setLatitude(buf.readFloatLE());
+            position.setSpeed(UnitsConverter.knotsFromKph(BcdUtil.readInteger(buf, 4) * 0.1));
+            position.setCourse(buf.readUnsignedShort());
+
+            position.set(Position.KEY_RPM, buf.readUnsignedShort());
+
+            return position;
+
+        } else if (type == MSG_BLE) {
+
+            return decodeBle(channel, deviceSession, buf, type, index, imei);
+
         } else if (type == MSG_COMMAND) {
 
             Position position = new Position(getProtocolName());
@@ -174,6 +230,85 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
         }
 
         return null;
+    }
+
+    private Position decodeBle(
+            Channel channel, DeviceSession deviceSession, ByteBuf buf, int type, int index, ByteBuf imei) {
+
+        Position position = new Position(getProtocolName());
+        position.setDeviceId(deviceSession.getDeviceId());
+
+        getLastLocation(position, readDate(buf));
+
+        position.set(Position.KEY_IGNITION, buf.readUnsignedByte() > 0);
+
+        int i = 1;
+        while (buf.isReadable()) {
+            switch (buf.readUnsignedShort()) {
+                case 0x01:
+                    position.set("tag" + i + "Id", ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", buf.readUnsignedByte() * 0.01 + 1.22);
+                    position.set("tag" + i + "TirePressure", buf.readUnsignedByte() * 1.527 * 2);
+                    position.set("tag" + i + "TireTemp", buf.readUnsignedByte() - 55);
+                    position.set("tag" + i + "TireStatus", buf.readUnsignedByte());
+                    break;
+                case 0x02:
+                    position.set("tag" + i + "Id", ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", BcdUtil.readInteger(buf, 2) * 0.1);
+                    switch (buf.readUnsignedByte()) {
+                        case 0:
+                            position.set(Position.KEY_ALARM, Position.ALARM_SOS);
+                            break;
+                        case 1:
+                            position.set(Position.KEY_ALARM, Position.ALARM_LOW_BATTERY);
+                            break;
+                        default:
+                            break;
+                    }
+                    buf.readUnsignedByte(); // status
+                    buf.skipBytes(16); // location
+                    break;
+                case 0x03:
+                    position.set(Position.KEY_DRIVER_UNIQUE_ID, ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", BcdUtil.readInteger(buf, 2) * 0.1);
+                    if (buf.readUnsignedByte() == 1) {
+                        position.set(Position.KEY_ALARM, Position.ALARM_LOW_BATTERY);
+                    }
+                    buf.readUnsignedByte(); // status
+                    buf.skipBytes(16); // location
+                    break;
+                case 0x04:
+                    position.set("tag" + i + "Id", ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", buf.readUnsignedByte() * 0.01 + 2);
+                    buf.readUnsignedByte(); // battery level
+                    position.set("tag" + i + "Temp", buf.readUnsignedShort() * 0.01);
+                    position.set("tag" + i + "Humidity", buf.readUnsignedShort() * 0.01);
+                    position.set("tag" + i + "LightSensor", buf.readUnsignedShort());
+                    position.set("tag" + i + "Rssi", buf.readUnsignedByte() - 128);
+                    break;
+                case 0x05:
+                    position.set("tag" + i + "Id", ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", buf.readUnsignedByte() * 0.01 + 2);
+                    buf.readUnsignedByte(); // battery level
+                    position.set("tag" + i + "Temp", buf.readUnsignedShort() * 0.01);
+                    position.set("tag" + i + "Door", buf.readUnsignedByte() > 0);
+                    position.set("tag" + i + "Rssi", buf.readUnsignedByte() - 128);
+                    break;
+                case 0x06:
+                    position.set("tag" + i + "Id", ByteBufUtil.hexDump(buf.readSlice(6)));
+                    position.set("tag" + i + "Battery", buf.readUnsignedByte() * 0.01 + 2);
+                    position.set("tag" + i + "Output", buf.readUnsignedByte() > 0);
+                    position.set("tag" + i + "Rssi", buf.readUnsignedByte() - 128);
+                    break;
+                default:
+                    break;
+            }
+            i += 1;
+        }
+
+        sendResponse(channel, header, type, index, imei, 0);
+
+        return position;
     }
 
     private Position decodePosition(
@@ -209,13 +344,26 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
             int io = buf.readUnsignedShort();
             position.set(Position.KEY_IGNITION, BitUtil.check(io, 14));
             position.set("ac", BitUtil.check(io, 13));
-            for (int i = 0; i <= 2; i++) {
-                position.set(Position.PREFIX_OUT + (i + 1), BitUtil.check(io, 7 + i));
+            position.set(Position.PREFIX_IN + 3, BitUtil.check(io, 12));
+            position.set(Position.PREFIX_IN + 4, BitUtil.check(io, 11));
+
+            if (type == MSG_GPS_2 || type == MSG_ALARM_2) {
+                position.set(Position.KEY_OUTPUT, buf.readUnsignedByte());
+                buf.readUnsignedByte(); // reserved
+            } else {
+                position.set(Position.PREFIX_OUT + 1, BitUtil.check(io, 7));
+                position.set(Position.PREFIX_OUT + 2, BitUtil.check(io, 8));
+                position.set(Position.PREFIX_OUT + 3, BitUtil.check(io, 9));
             }
 
             if (header != 0x2626) {
-                position.set(Position.PREFIX_ADC + 1, buf.readUnsignedShort());
-                position.set(Position.PREFIX_ADC + 2, buf.readUnsignedShort());
+                int adcCount = type == MSG_GPS_2 || type == MSG_ALARM_2 ? 5 : 2;
+                for (int i = 1; i <= adcCount; i++) {
+                    String value = ByteBufUtil.hexDump(buf.readSlice(2));
+                    if (!value.equals("ffff")) {
+                        position.set(Position.PREFIX_ADC + i, Integer.parseInt(value) * 0.01);
+                    }
+                }
             }
 
         }
@@ -299,13 +447,45 @@ public class T800xProtocolDecoder extends BaseProtocolDecoder {
             buf.readUnsignedShort(); // distance upload interval
             buf.readUnsignedByte(); // heartbeat
 
-        } else if (buf.readableBytes() >= 2) {
+        } else {
 
-            position.set(Position.KEY_POWER, BcdUtil.readInteger(buf, 4) * 0.01);
-
+            if (buf.readableBytes() >= 2) {
+                position.set(Position.KEY_POWER, BcdUtil.readInteger(buf, 4) * 0.01);
+            }
+            if (buf.readableBytes() >= 19) {
+                position.set(Position.KEY_OBD_SPEED, BcdUtil.readInteger(buf, 4) * 0.01);
+                position.set(Position.KEY_FUEL_USED, buf.readUnsignedInt() * 0.001);
+                position.set(Position.KEY_FUEL_CONSUMPTION, buf.readUnsignedInt() * 0.001);
+                position.set(Position.KEY_RPM, buf.readUnsignedShort());
+                int value;
+                value = buf.readUnsignedByte();
+                if (value != 0xff) {
+                    position.set("airInput", value);
+                }
+                if (value != 0xff) {
+                    position.set("airPressure", value);
+                }
+                if (value != 0xff) {
+                    position.set(Position.KEY_COOLANT_TEMP, value - 40);
+                }
+                if (value != 0xff) {
+                    position.set("airTemp", value - 40);
+                }
+                if (value != 0xff) {
+                    position.set(Position.KEY_ENGINE_LOAD, value);
+                }
+                if (value != 0xff) {
+                    position.set(Position.KEY_THROTTLE, value);
+                }
+                if (value != 0xff) {
+                    position.set(Position.KEY_FUEL_LEVEL, value);
+                }
+            }
         }
 
-        sendResponse(channel, header, type, index, imei, alarm);
+        if (type == MSG_ALARM || type == MSG_ALARM_2) {
+            sendResponse(channel, header, type, index, imei, alarm);
+        }
 
         return position;
     }

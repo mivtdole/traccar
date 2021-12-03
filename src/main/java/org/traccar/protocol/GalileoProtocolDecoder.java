@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 - 2018 Anton Tananaev (anton@traccar.org)
+ * Copyright 2013 - 2020 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ public class GalileoProtocolDecoder extends BaseProtocolDecoder {
     private static int getTagLength(int tag) {
         Integer length = TAG_LENGTH_MAP.get(tag);
         if (length == null) {
-            throw new IllegalArgumentException("Unknown tag: " + tag);
+            throw new IllegalArgumentException(String.format("Unknown tag: 0x%02x", tag));
         }
         return length;
     }
@@ -309,18 +309,17 @@ public class GalileoProtocolDecoder extends BaseProtocolDecoder {
 
         Position position = null;
 
+        if (photo == null) {
+            photo = Unpooled.buffer();
+        }
+
+        buf.readUnsignedByte(); // part number
+
         if (length > 1) {
 
-            if (photo == null) {
-                photo = Unpooled.buffer();
-            }
-
-            buf.readUnsignedByte(); // part number
             photo.writeBytes(buf, length - 1);
 
-            sendResponse(channel, 0x07, buf.readUnsignedShortLE());
-
-        } else if (photo != null) {
+        } else {
 
             DeviceSession deviceSession = getDeviceSession(channel, remoteAddress);
             String uniqueId = Context.getIdentityManager().getById(deviceSession.getDeviceId()).getUniqueId();
@@ -335,6 +334,8 @@ public class GalileoProtocolDecoder extends BaseProtocolDecoder {
             photo = null;
 
         }
+
+        sendResponse(channel, 0x07, buf.readUnsignedShortLE());
 
         return position;
     }

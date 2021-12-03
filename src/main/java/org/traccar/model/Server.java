@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 - 2019 Anton Tananaev (anton@traccar.org)
+ * Copyright 2015 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,12 @@
  */
 package org.traccar.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.traccar.Context;
 import org.traccar.database.QueryIgnore;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Server extends ExtendedModel {
-
-    @QueryIgnore
-    public String getVersion() {
-        return getClass().getPackage().getImplementationVersion();
-    }
-
-    public void setVersion(String version) {
-    }
 
     private boolean registration;
 
@@ -176,4 +171,15 @@ public class Server extends ExtendedModel {
     public void setAnnouncement(String announcement) {
         this.announcement = announcement;
     }
+
+    @QueryIgnore
+    public String getVersion() {
+        return getClass().getPackage().getImplementationVersion();
+    }
+
+    @QueryIgnore
+    public Boolean getEmailEnabled() {
+        return Context.getMailManager().getEmailEnabled();
+    }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 - 2018 Anton Tananaev (anton@traccar.org)
+ * Copyright 2012 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ public class Gps103ProtocolDecoder extends BaseProtocolDecoder {
             .or()
             .text("F,")
             .groupBegin()
-            .number("(dd)(dd)(dd).d+")           // time utc (hhmmss)
+            .number("(dd)(dd)(dd)(?:.d+)?")      // time utc (hhmmss)
             .or()
             .number("(?:d{1,5}.d+)?")
             .groupEnd()
@@ -140,8 +140,6 @@ public class Gps103ProtocolDecoder extends BaseProtocolDecoder {
             return Position.ALARM_FUEL_LEAK;
         }
         switch (value) {
-            case "tracker":
-                return null;
             case "help me":
                 return Position.ALARM_SOS;
             case "low battery":
@@ -152,10 +150,6 @@ public class Gps103ProtocolDecoder extends BaseProtocolDecoder {
                 return Position.ALARM_MOVEMENT;
             case "speed":
                 return Position.ALARM_OVERSPEED;
-            case "acc on":
-                return Position.ALARM_POWER_ON;
-            case "acc off":
-                return Position.ALARM_POWER_OFF;
             case "door alarm":
                 return Position.ALARM_DOOR;
             case "ac alarm":
@@ -163,13 +157,14 @@ public class Gps103ProtocolDecoder extends BaseProtocolDecoder {
             case "accident alarm":
                 return Position.ALARM_ACCIDENT;
             case "sensor alarm":
-                return Position.ALARM_SHOCK;
+                return Position.ALARM_VIBRATION;
             case "bonnet alarm":
                 return Position.ALARM_BONNET;
             case "footbrake alarm":
                 return Position.ALARM_FOOT_BRAKE;
             case "DTC":
                 return Position.ALARM_FAULT;
+            case "tracker":
             default:
                 return null;
         }

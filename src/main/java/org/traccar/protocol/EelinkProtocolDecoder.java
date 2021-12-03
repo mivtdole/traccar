@@ -78,6 +78,8 @@ public class EelinkProtocolDecoder extends BaseProtocolDecoder {
             case 0x08:
             case 0x09:
                 return Position.ALARM_GPS_ANTENNA_CUT;
+            case 0x25:
+                return Position.ALARM_REMOVING;
             case 0x81:
                 return Position.ALARM_LOW_SPEED;
             case 0x82:
@@ -419,7 +421,7 @@ public class EelinkProtocolDecoder extends BaseProtocolDecoder {
             ByteBuf content = Unpooled.buffer();
             if (type == MSG_LOGIN) {
                 content.writeInt((int) (System.currentTimeMillis() / 1000));
-                content.writeByte(1); // protocol version
+                content.writeShort(1); // protocol version
                 content.writeByte(0); // action mask
             }
             ByteBuf response = EelinkProtocolEncoder.encodeContent(

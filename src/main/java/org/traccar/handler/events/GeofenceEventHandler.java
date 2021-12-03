@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 - 2019 Anton Tananaev (anton@traccar.org)
+ * Copyright 2016 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import java.util.Map;
 
 import io.netty.channel.ChannelHandler;
 import org.traccar.database.CalendarManager;
+import org.traccar.database.ConnectionManager;
 import org.traccar.database.GeofenceManager;
 import org.traccar.database.IdentityManager;
 import org.traccar.model.Calendar;
@@ -35,12 +36,15 @@ public class GeofenceEventHandler extends BaseEventHandler {
     private final IdentityManager identityManager;
     private final GeofenceManager geofenceManager;
     private final CalendarManager calendarManager;
+    private final ConnectionManager connectionManager;
 
     public GeofenceEventHandler(
-            IdentityManager identityManager, GeofenceManager geofenceManager, CalendarManager calendarManager) {
+            IdentityManager identityManager, GeofenceManager geofenceManager, CalendarManager calendarManager,
+            ConnectionManager connectionManager) {
         this.identityManager = identityManager;
         this.geofenceManager = geofenceManager;
         this.calendarManager = calendarManager;
+        this.connectionManager = connectionManager;
     }
 
     @Override
@@ -63,13 +67,16 @@ public class GeofenceEventHandler extends BaseEventHandler {
         oldGeofences.removeAll(currentGeofences);
 
         device.setGeofenceIds(currentGeofences);
+        if (!oldGeofences.isEmpty() || !newGeofences.isEmpty()) {
+            connectionManager.updateDevice(device);
+        }
 
         Map<Event, Position> events = new HashMap<>();
         for (long geofenceId : oldGeofences) {
             long calendarId = geofenceManager.getById(geofenceId).getCalendarId();
             Calendar calendar = calendarId != 0 ? calendarManager.getById(calendarId) : null;
             if (calendar == null || calendar.checkMoment(position.getFixTime())) {
-                Event event = new Event(Event.TYPE_GEOFENCE_EXIT, position.getDeviceId(), position.getId());
+                Event event = new Event(Event.TYPE_GEOFENCE_EXIT, position);
                 event.setGeofenceId(geofenceId);
                 events.put(event, position);
             }
@@ -78,7 +85,7 @@ public class GeofenceEventHandler extends BaseEventHandler {
             long calendarId = geofenceManager.getById(geofenceId).getCalendarId();
             Calendar calendar = calendarId != 0 ? calendarManager.getById(calendarId) : null;
             if (calendar == null || calendar.checkMoment(position.getFixTime())) {
-                Event event = new Event(Event.TYPE_GEOFENCE_ENTER, position.getDeviceId(), position.getId());
+                Event event = new Event(Event.TYPE_GEOFENCE_ENTER, position);
                 event.setGeofenceId(geofenceId);
                 events.put(event, position);
             }

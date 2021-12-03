@@ -1,5 +1,6 @@
 /*
- * Copyright 2019 Anton Tananaev (anton@traccar.org)
+ * Copyright 2019 - 2021 Anton Tananaev (anton@traccar.org)
+ * Copyright 2021 Rafael Miquelino (rafaelmiquelino@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +20,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.traccar.Context;
+import org.traccar.model.User;
+import org.traccar.config.Keys;
 import org.traccar.model.Event;
 import org.traccar.model.Position;
 import org.traccar.notification.NotificationFormatter;
+import org.traccar.notification.NotificationMessage;
 
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.InvocationCallback;
@@ -30,10 +34,12 @@ public class NotificatorTelegram extends Notificator {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NotificatorTelegram.class);
 
-    private String url;
-    private String chatId;
+    private final String urlSendText;
+    private final String urlSendLocation;
+    private final String chatId;
+    private final boolean sendLocation;
 
-    public static class Message {
+    public static class TextMessage {
         @JsonProperty("chat_id")
         private String chatId;
         @JsonProperty("text")
@@ -42,20 +48,31 @@ public class NotificatorTelegram extends Notificator {
         private String parseMode = "html";
     }
 
-    public NotificatorTelegram() {
-        url = String.format(
-                "https://api.telegram.org/bot%s/sendMessage",
-                Context.getConfig().getString("notificator.telegram.key"));
-        chatId = Context.getConfig().getString("notificator.telegram.chatId");
+    public static class LocationMessage {
+        @JsonProperty("chat_id")
+        private String chatId;
+        @JsonProperty("latitude")
+        private double latitude;
+        @JsonProperty("longitude")
+        private double longitude;
+        @JsonProperty("horizontal_accuracy")
+        private double accuracy;
+        @JsonProperty("bearing")
+        private int bearing;
     }
 
-    @Override
-    public void sendSync(long userId, Event event, Position position) {
+    public NotificatorTelegram() {
+        urlSendText = String.format(
+                "https://api.telegram.org/bot%s/sendMessage",
+                Context.getConfig().getString(Keys.NOTIFICATOR_TELEGRAM_KEY));
+        urlSendLocation = String.format(
+                "https://api.telegram.org/bot%s/sendLocation",
+                Context.getConfig().getString(Keys.NOTIFICATOR_TELEGRAM_KEY));
+        chatId = Context.getConfig().getString(Keys.NOTIFICATOR_TELEGRAM_CHAT_ID);
+        sendLocation = Context.getConfig().getBoolean(Keys.NOTIFICATOR_TELEGRAM_SEND_LOCATION);
+    }
 
-        Message message = new Message();
-        message.chatId = chatId;
-        message.text = NotificationFormatter.formatShortMessage(userId, event, position);
-
+    private void executeRequest(String url, Object message) {
         Context.getClient().target(url).request()
                 .async().post(Entity.json(message), new InvocationCallback<Object>() {
             @Override
@@ -67,6 +84,33 @@ public class NotificatorTelegram extends Notificator {
                 LOGGER.warn("Telegram API error", throwable);
             }
         });
+    }
+
+    private LocationMessage createLocationMessage(String messageChatId, Position position) {
+        LocationMessage locationMessage = new LocationMessage();
+        locationMessage.chatId = messageChatId;
+        locationMessage.latitude = position.getLatitude();
+        locationMessage.longitude = position.getLongitude();
+        locationMessage.bearing = (int) Math.ceil(position.getCourse());
+        locationMessage.accuracy = position.getAccuracy();
+        return locationMessage;
+    }
+
+    @Override
+    public void sendSync(long userId, Event event, Position position) {
+        User user = Context.getPermissionsManager().getUser(userId);
+        NotificationMessage shortMessage = NotificationFormatter.formatMessage(userId, event, position, "short");
+
+        TextMessage message = new TextMessage();
+        message.chatId = user.getString("telegramChatId");
+        if (message.chatId == null) {
+            message.chatId = chatId;
+        }
+        message.text = shortMessage.getBody();
+        executeRequest(urlSendText, message);
+        if (sendLocation && position != null) {
+            executeRequest(urlSendLocation, createLocationMessage(message.chatId, position));
+        }
     }
 
     @Override

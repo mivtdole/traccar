@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 - 2019 Anton Tananaev (anton@traccar.org)
+ * Copyright 2013 - 2020 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -171,6 +171,33 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
             .any()
             .compile();
 
+    private static final Pattern PATTERN_OBD = new PatternBuilder()
+            .text("$$")                          // header
+            .number("dddd")                      // length
+            .number("xx")                        // type
+            .number("(d+)|")                     // imei
+            .number("(dd)(dd)(dd)")              // date (yymmdd)
+            .number("(dd)(dd)(dd),")             // time (hhmmss)
+            .number("(-?d+.d+),")                // longitude
+            .number("(-?d+.d+),")                // latitude
+            .expression("[^,]*,")                // obd version
+            .number("(d+),")                     // odometer
+            .number("(d+),")                     // fuel used
+            .number("(d+),")                     // fuel consumption
+            .number("(d+),")                     // power
+            .number("(d+),")                     // rpm
+            .number("(d+),")                     // speed
+            .number("(d+),")                     // intake flow
+            .number("(d+),")                     // intake pressure
+            .number("(d+),")                     // coolant temperature
+            .number("(d+),")                     // intake temperature
+            .number("(d+),")                     // engine load
+            .number("(d+),")                     // throttle
+            .number("(d+),")                     // fuel
+            .number("|xx")                       // checksum
+            .any()
+            .compile();
+
     private String decodeAlarm123(int value) {
         switch (value) {
             case 0x01:
@@ -200,8 +227,22 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
                 return Position.ALARM_GEOFENCE_EXIT;
             case 0x05:
                 return Position.ALARM_GEOFENCE_ENTER;
+            case 0x06:
+                return Position.ALARM_TOW;
+            case 0x07:
+                return Position.ALARM_GPS_ANTENNA_CUT;
+            case 0x10:
+                return Position.ALARM_POWER_CUT;
+            case 0x11:
+                return Position.ALARM_POWER_RESTORED;
+            case 0x12:
+                return Position.ALARM_LOW_POWER;
+            case 0x13:
+                return Position.ALARM_LOW_BATTERY;
             case 0x40:
-                return Position.ALARM_SHOCK;
+                return Position.ALARM_VIBRATION;
+            case 0x41:
+                return Position.ALARM_IDLE;
             case 0x42:
                 return Position.ALARM_ACCELERATION;
             case 0x43:
@@ -330,17 +371,11 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
         position.set(Position.KEY_CHARGE, BitUtil.check(status, 32 - 4));
         position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 5) ? Position.ALARM_GEOFENCE_EXIT : null);
         position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 6) ? Position.ALARM_GEOFENCE_ENTER : null);
+        position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 7) ? Position.ALARM_GPS_ANTENNA_CUT : null);
         position.set(Position.PREFIX_OUT + 1, BitUtil.check(status, 32 - 9));
         position.set(Position.PREFIX_OUT + 2, BitUtil.check(status, 32 - 10));
         position.set(Position.PREFIX_OUT + 3, BitUtil.check(status, 32 - 11));
-        position.set(Position.PREFIX_OUT + 4, BitUtil.check(status, 32 - 12));
-        position.set(Position.PREFIX_IN + 2, BitUtil.check(status, 32 - 13));
-        position.set(Position.PREFIX_IN + 3, BitUtil.check(status, 32 - 14));
-        position.set(Position.PREFIX_IN + 4, BitUtil.check(status, 32 - 15));
-        position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 16) ? Position.ALARM_SHOCK : null);
-        position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 18) ? Position.ALARM_LOW_BATTERY : null);
-        position.set(Position.KEY_ALARM, BitUtil.check(status, 32 - 22) ? Position.ALARM_JAMMING : null);
-
+        position.set(Position.KEY_STATUS, status); // see https://github.com/traccar/traccar/pull/4762
 
         position.setTime(parser.nextDateTime());
 
@@ -385,13 +420,39 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
         return true;
     }
 
+    private boolean decodeObd(Position position, Parser parser) {
+
+        position.setValid(true);
+        position.setTime(parser.nextDateTime());
+        position.setLatitude(parser.nextDouble());
+        position.setLongitude(parser.nextDouble());
+
+        position.set(Position.KEY_ODOMETER, parser.nextLong());
+        position.set(Position.KEY_FUEL_USED, parser.nextInt());
+        position.set(Position.KEY_FUEL_CONSUMPTION, parser.nextInt());
+        position.set(Position.KEY_POWER, parser.nextInt() * 0.001);
+        position.set(Position.KEY_RPM, parser.nextInt());
+        position.set(Position.KEY_OBD_SPEED, parser.nextInt());
+        parser.nextInt(); // intake flow
+        parser.nextInt(); // intake pressure
+        position.set(Position.KEY_COOLANT_TEMP, parser.nextInt());
+        position.set("intakeTemp", parser.nextInt());
+        position.set(Position.KEY_ENGINE_LOAD, parser.nextInt());
+        position.set(Position.KEY_THROTTLE, parser.nextInt());
+        position.set(Position.KEY_FUEL_LEVEL, parser.nextInt());
+
+        return true;
+    }
+
     @Override
     protected Object decode(
             Channel channel, SocketAddress remoteAddress, Object msg) throws Exception {
 
         String sentence = (String) msg;
         Pattern pattern = PATTERN3;
-        if (sentence.charAt(2) == '0') {
+        if (sentence.contains("$Cloud")) {
+            pattern = PATTERN_OBD;
+        } else if (sentence.charAt(2) == '0') {
             pattern = PATTERN4;
         } else if (sentence.contains("$GPRMC")) {
             pattern = PATTERN1;
@@ -424,8 +485,10 @@ public class TotemProtocolDecoder extends BaseProtocolDecoder {
             result = decode12(position, parser, pattern);
         } else if (pattern == PATTERN3) {
             result = decode3(position, parser);
-        } else {
+        } else if (pattern == PATTERN4) {
             result = decode4(position, parser);
+        } else {
+            result = decodeObd(position, parser);
         }
 
         if (channel != null) {

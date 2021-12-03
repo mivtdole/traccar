@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 - 2018 Anton Tananaev (anton@traccar.org)
+ * Copyright 2015 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import org.traccar.model.Group;
 import org.traccar.model.Maintenance;
 import org.traccar.model.ManagedUser;
 import org.traccar.model.Notification;
+import org.traccar.model.Order;
 import org.traccar.model.Permission;
 import org.traccar.model.Server;
 import org.traccar.model.User;
@@ -38,6 +39,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class PermissionsManager {
 
@@ -47,6 +50,8 @@ public class PermissionsManager {
     private final UsersManager usersManager;
 
     private volatile Server server;
+
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     private final Map<Long, Set<Long>> groupPermissions = new HashMap<>();
     private final Map<Long, Set<Long>> devicePermissions = new HashMap<>();
@@ -60,29 +65,65 @@ public class PermissionsManager {
         refreshDeviceAndGroupPermissions();
     }
 
+    protected final void readLock() {
+        lock.readLock().lock();
+    }
+
+    protected final void readUnlock() {
+        lock.readLock().unlock();
+    }
+
+    protected final void writeLock() {
+        lock.writeLock().lock();
+    }
+
+    protected final void writeUnlock() {
+        lock.writeLock().unlock();
+    }
+
     public User getUser(long userId) {
-        return usersManager.getById(userId);
+        readLock();
+        try {
+            return usersManager.getById(userId);
+        } finally {
+            readUnlock();
+        }
     }
 
     public Set<Long> getGroupPermissions(long userId) {
-        if (!groupPermissions.containsKey(userId)) {
-            groupPermissions.put(userId, new HashSet<>());
+        readLock();
+        try {
+            if (!groupPermissions.containsKey(userId)) {
+                groupPermissions.put(userId, new HashSet<>());
+            }
+            return groupPermissions.get(userId);
+        } finally {
+            readUnlock();
         }
-        return groupPermissions.get(userId);
     }
 
     public Set<Long> getDevicePermissions(long userId) {
-        if (!devicePermissions.containsKey(userId)) {
-            devicePermissions.put(userId, new HashSet<>());
+        readLock();
+        try {
+            if (!devicePermissions.containsKey(userId)) {
+                devicePermissions.put(userId, new HashSet<>());
+            }
+            return devicePermissions.get(userId);
+        } finally {
+            readUnlock();
         }
-        return devicePermissions.get(userId);
     }
 
     private Set<Long> getAllDeviceUsers(long deviceId) {
-        if (!deviceUsers.containsKey(deviceId)) {
-            deviceUsers.put(deviceId, new HashSet<>());
+        readLock();
+        try {
+            if (!deviceUsers.containsKey(deviceId)) {
+                deviceUsers.put(deviceId, new HashSet<>());
+            }
+            return deviceUsers.get(deviceId);
+        } finally {
+            readUnlock();
         }
-        return deviceUsers.get(deviceId);
     }
 
     public Set<Long> getDeviceUsers(long deviceId) {
@@ -101,10 +142,15 @@ public class PermissionsManager {
     }
 
     public Set<Long> getGroupDevices(long groupId) {
-        if (!groupDevices.containsKey(groupId)) {
-            groupDevices.put(groupId, new HashSet<>());
+        readLock();
+        try {
+            if (!groupDevices.containsKey(groupId)) {
+                groupDevices.put(groupId, new HashSet<>());
+            }
+            return groupDevices.get(groupId);
+        } finally {
+            readUnlock();
         }
-        return groupDevices.get(groupId);
     }
 
     public void refreshServer() {
@@ -116,44 +162,49 @@ public class PermissionsManager {
     }
 
     public final void refreshDeviceAndGroupPermissions() {
-        groupPermissions.clear();
-        devicePermissions.clear();
+        writeLock();
         try {
-            GroupTree groupTree = new GroupTree(Context.getGroupsManager().getItems(
-                    Context.getGroupsManager().getAllItems()),
-                    Context.getDeviceManager().getAllDevices());
-            for (Permission groupPermission : dataManager.getPermissions(User.class, Group.class)) {
-                Set<Long> userGroupPermissions = getGroupPermissions(groupPermission.getOwnerId());
-                Set<Long> userDevicePermissions = getDevicePermissions(groupPermission.getOwnerId());
-                userGroupPermissions.add(groupPermission.getPropertyId());
-                for (Group group : groupTree.getGroups(groupPermission.getPropertyId())) {
-                    userGroupPermissions.add(group.getId());
+            groupPermissions.clear();
+            devicePermissions.clear();
+            try {
+                GroupTree groupTree = new GroupTree(Context.getGroupsManager().getItems(
+                        Context.getGroupsManager().getAllItems()),
+                        Context.getDeviceManager().getAllDevices());
+                for (Permission groupPermission : dataManager.getPermissions(User.class, Group.class)) {
+                    Set<Long> userGroupPermissions = getGroupPermissions(groupPermission.getOwnerId());
+                    Set<Long> userDevicePermissions = getDevicePermissions(groupPermission.getOwnerId());
+                    userGroupPermissions.add(groupPermission.getPropertyId());
+                    for (Group group : groupTree.getGroups(groupPermission.getPropertyId())) {
+                        userGroupPermissions.add(group.getId());
+                    }
+                    for (Device device : groupTree.getDevices(groupPermission.getPropertyId())) {
+                        userDevicePermissions.add(device.getId());
+                    }
                 }
-                for (Device device : groupTree.getDevices(groupPermission.getPropertyId())) {
-                    userDevicePermissions.add(device.getId());
+
+                for (Permission devicePermission : dataManager.getPermissions(User.class, Device.class)) {
+                    getDevicePermissions(devicePermission.getOwnerId()).add(devicePermission.getPropertyId());
+                }
+
+                groupDevices.clear();
+                for (long groupId : Context.getGroupsManager().getAllItems()) {
+                    for (Device device : groupTree.getDevices(groupId)) {
+                        getGroupDevices(groupId).add(device.getId());
+                    }
+                }
+
+            } catch (SQLException | ClassNotFoundException error) {
+                LOGGER.warn("Refresh device permissions error", error);
+            }
+
+            deviceUsers.clear();
+            for (Map.Entry<Long, Set<Long>> entry : devicePermissions.entrySet()) {
+                for (long deviceId : entry.getValue()) {
+                    getAllDeviceUsers(deviceId).add(entry.getKey());
                 }
             }
-
-            for (Permission devicePermission : dataManager.getPermissions(User.class, Device.class)) {
-                getDevicePermissions(devicePermission.getOwnerId()).add(devicePermission.getPropertyId());
-            }
-
-            groupDevices.clear();
-            for (long groupId : Context.getGroupsManager().getAllItems()) {
-                for (Device device : groupTree.getDevices(groupId)) {
-                    getGroupDevices(groupId).add(device.getId());
-                }
-            }
-
-        } catch (SQLException | ClassNotFoundException error) {
-            LOGGER.warn("Refresh device permissions error", error);
-        }
-
-        deviceUsers.clear();
-        for (Map.Entry<Long, Set<Long>> entry : devicePermissions.entrySet()) {
-            for (long deviceId : entry.getValue()) {
-                getAllDeviceUsers(deviceId).add(entry.getKey());
-            }
+        } finally {
+            writeUnlock();
         }
     }
 
@@ -345,6 +396,8 @@ public class PermissionsManager {
             manager = Context.getMaintenancesManager();
         } else if (object.equals(Notification.class)) {
             manager = Context.getNotificationManager();
+        } else if (object.equals(Order.class)) {
+            manager = Context.getOrderManager();
         } else {
             throw new IllegalArgumentException("Unknown object type");
         }
@@ -404,6 +457,8 @@ public class PermissionsManager {
                 Context.getCommandsManager().refreshUserItems();
             } else if (permission.getPropertyClass().equals(Maintenance.class)) {
                 Context.getMaintenancesManager().refreshUserItems();
+            } else if (permission.getPropertyClass().equals(Order.class)) {
+                Context.getOrderManager().refreshUserItems();
             } else if (permission.getPropertyClass().equals(Notification.class)
                     && Context.getNotificationManager() != null) {
                 Context.getNotificationManager().refreshUserItems();
@@ -419,6 +474,8 @@ public class PermissionsManager {
                 Context.getCommandsManager().refreshExtendedPermissions();
             } else if (permission.getPropertyClass().equals(Maintenance.class)) {
                 Context.getMaintenancesManager().refreshExtendedPermissions();
+            } else if (permission.getPropertyClass().equals(Order.class)) {
+                Context.getOrderManager().refreshExtendedPermissions();
             } else if (permission.getPropertyClass().equals(Notification.class)
                     && Context.getNotificationManager() != null) {
                 Context.getNotificationManager().refreshExtendedPermissions();

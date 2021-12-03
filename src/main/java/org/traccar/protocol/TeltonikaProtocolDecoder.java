@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 - 2020 Anton Tananaev (anton@traccar.org)
+ * Copyright 2013 - 2021 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import org.traccar.Context;
 import org.traccar.DeviceSession;
 import org.traccar.NetworkMessage;
 import org.traccar.Protocol;
+import org.traccar.config.Keys;
 import org.traccar.helper.BitUtil;
 import org.traccar.helper.Checksum;
 import org.traccar.helper.UnitsConverter;
@@ -54,7 +55,7 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
     public TeltonikaProtocolDecoder(Protocol protocol, boolean connectionless) {
         super(protocol);
         this.connectionless = connectionless;
-        this.extended = Context.getConfig().getBoolean(getProtocolName() + ".extended");
+        this.extended = Context.getConfig().getBoolean(Keys.PROTOCOL_EXTENDED.withPrefix(getProtocolName()));
     }
 
     private void parseIdentification(Channel channel, SocketAddress remoteAddress, ByteBuf buf) {
@@ -208,7 +209,6 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
                 position.set(Position.PREFIX_ADC + 2, readValue(buf, length, false));
                 break;
             case 16:
-            case 87:
                 position.set(Position.KEY_ODOMETER, readValue(buf, length, false));
                 break;
             case 17:
@@ -223,23 +223,17 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
             case 21:
                 position.set(Position.KEY_RSSI, readValue(buf, length, false));
                 break;
-            case 24:
-                readValue(buf, length, false); // speed
-                break;
             case 25:
             case 26:
             case 27:
             case 28:
-                position.set(Position.PREFIX_TEMP + (id - 24), readValue(buf, length, true) * 0.1);
+                position.set(Position.PREFIX_TEMP + (id - 24 + 4), readValue(buf, length, true) * 0.1);
                 break;
             case 66:
                 position.set(Position.KEY_POWER, readValue(buf, length, false) * 0.001);
                 break;
             case 67:
                 position.set(Position.KEY_BATTERY, readValue(buf, length, false) * 0.001);
-                break;
-            case 69:
-                position.set("gpsStatus", readValue(buf, length, false));
                 break;
             case 72:
             case 73:
@@ -255,46 +249,11 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
             case 80:
                 position.set("workMode", readValue(buf, length, false));
                 break;
-            case 81:
-                position.set(Position.KEY_OBD_SPEED, readValue(buf, length, false));
-                break;
-            case 82:
-                position.set(Position.KEY_THROTTLE, readValue(buf, length, false));
-                break;
-            case 83:
-                position.set(Position.KEY_FUEL_USED, readValue(buf, length, false) * 0.1);
-                break;
-            case 84:
-                position.set(Position.KEY_FUEL_LEVEL, readValue(buf, length, false) * 0.1);
-                break;
-            case 85:
-                position.set(Position.KEY_RPM, readValue(buf, length, false));
-                break;
             case 90:
                 position.set(Position.KEY_DOOR, readValue(buf, length, false));
                 break;
-            case 110:
-                position.set(Position.KEY_FUEL_CONSUMPTION, readValue(buf, length, true) * 0.1);
-                break;
-            case 113:
-                if (length == 1) {
-                    position.set(Position.KEY_BATTERY_LEVEL, readValue(buf, length, true));
-                } else {
-                    position.set(Position.PREFIX_IO + id, readValue(buf, length, false));
-                }
-                break;
             case 115:
                 position.set(Position.KEY_COOLANT_TEMP, readValue(buf, length, true) * 0.1);
-                break;
-            case 129:
-            case 130:
-            case 131:
-            case 132:
-            case 133:
-            case 134:
-                String driver = id == 129 || id == 132 ? "" : position.getString("driver1");
-                position.set("driver" + (id >= 132 ? 2 : 1),
-                        driver + buf.readSlice(length).toString(StandardCharsets.US_ASCII).trim());
                 break;
             case 179:
                 position.set(Position.PREFIX_OUT + 1, readValue(buf, length, false) == 1);
@@ -311,12 +270,9 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
             case 199:
                 position.set(Position.KEY_ODOMETER_TRIP, readValue(buf, length, false));
                 break;
-            case 235:
-                position.set("oilLevel", readValue(buf, length, false));
-                break;
             case 236:
                 if (readValue(buf, length, false) == 1) {
-                    position.set(Position.KEY_ALARM, Position.ALARM_OVERSPEED);
+                    position.set(Position.KEY_ALARM, Position.ALARM_GENERAL);
                 }
                 break;
             case 239:
@@ -568,7 +524,11 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
                 int id = buf.readUnsignedShort();
                 int length = buf.readUnsignedShort();
                 if (id == 256) {
-                    position.set(Position.KEY_VIN, buf.readSlice(length).toString(StandardCharsets.US_ASCII));
+                    position.set(Position.KEY_VIN,
+                            buf.readSlice(length).toString(StandardCharsets.US_ASCII));
+                } else if (id == 281) {
+                    position.set(Position.KEY_DTCS,
+                            buf.readSlice(length).toString(StandardCharsets.US_ASCII).replace(',', ' '));
                 } else if (id == 385) {
                     ByteBuf data = buf.readSlice(length);
                     data.readUnsignedByte(); // data part
@@ -648,19 +608,17 @@ public class TeltonikaProtocolDecoder extends BaseProtocolDecoder {
         }
 
         if (channel != null && codec != CODEC_12 && codec != CODEC_13) {
+            ByteBuf response = Unpooled.buffer();
             if (connectionless) {
-                ByteBuf response = Unpooled.buffer();
                 response.writeShort(5);
                 response.writeShort(0);
                 response.writeByte(0x01);
                 response.writeByte(locationPacketId);
                 response.writeByte(count);
-                channel.writeAndFlush(new NetworkMessage(response, remoteAddress));
             } else {
-                ByteBuf response = Unpooled.buffer();
                 response.writeInt(count);
-                channel.writeAndFlush(new NetworkMessage(response, remoteAddress));
             }
+            channel.writeAndFlush(new NetworkMessage(response, remoteAddress));
         }
 
         return positions.isEmpty() ? null : positions;

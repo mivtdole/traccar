@@ -9,7 +9,18 @@ public class StarLinkProtocolDecoderTest extends ProtocolTest {
     @Test
     public void testDecode() throws Exception {
 
-        StarLinkProtocolDecoder decoder = new StarLinkProtocolDecoder(null);
+        var decoder = new StarLinkProtocolDecoder(null);
+
+        decoder.setFormat("#IMEI#,#EDT#,#PDT#,#LAT#,#LONG#,#SPD#,#IGN#,#ODO#,#DUR#,#TDUR#,#LAC#,#CID#,#VIN#,#VBAT#,#EID#,#EDSC#,#DRV#,#SATU#,#CSS#,#OUT1#,#OUT2#,#CFL#");
+
+        verifyAttribute(decoder, text(
+                "$SLU0AF334,06,14260,352353088342073,210322083942,210322083940,+0937.2191,+04151.8206,000.0,0,006782,,30707,14010,11685,12.994,04.159,01,Location,0,20,64,0,0,12,0,2*7F"),
+                Position.KEY_FUEL_LEVEL, 12);
+
+        decoder.setFormat("#IMEI#,#EDT#,#EDSC#,#EID#,#PDT#,#LAT#,#LONG#,#SPDK#,#IGNL#,#HEAD#,#ODO#,#DUR#,#TDUR#,#VIN#,#VBAT#,#BATC#,#SATU#,#CSS#,#IN2#,#TVI#,#OUT1#,#OUT2#,#OUT3#,#OUTC#");
+
+        verifyAttributes(decoder, text(
+                "$SLU862549048423605,06,22597,862549048423605,201102121748,Location,01,201102121744,+4133.1223,+00205.8716,54,1,174,007572,2,7712,13.094,00.039,,11,75,1,29.0,0,0,0,0,1,4*6D"));
 
         decoder.setFormat("#IMEI#,#EDT#,#PDT#,#LAT#,#LONG#,#SPD#,#IGN#,#ODO#,#DUR#,#TDUR#,#LAC#,#CID#,#VIN#,#VBAT#,#EID#,#EDSC#,#DRV#,#SATU#,#CSS#,#OUT1#,#OUT2#,#IN2#,#IND#");
 
